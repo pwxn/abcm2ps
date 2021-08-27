@@ -1,16 +1,17 @@
 #! /bin/sh
 
 # (automatic update)
-VERSION=8.14.5
-VDATE=2019-07-17
+VERSION=8.14.12
+VDATE=2021-07-14
 
-CC=gcc
-CFLAGS="-g -O2 -Wall -pipe"
+: "${CC:=gcc}"
+: "${PKG_CONFIG:=pkg-config}"
+CFLAGS="-g -O2 -Wall -pipe $CFLAGS"
 
 srcdir=.
-prefix=/usr/local
+: "${prefix=/usr/local}"
 
-INSTALL="/usr/bin/install -c"
+: "${INSTALL:=/usr/bin/install -c}"
 
 if test -f ./custom; then
 	. ./custom
@@ -57,19 +58,13 @@ if test "x$DEFAULT_FDIR" = x; then
 	DEFAULT_FDIR="$prefix/share/abcm2ps"
 fi
 
-if which pkg-config > /dev/null ; then
-	if pkg-config --exists freetype2 ; then
-		if pkg-config --exists pangocairo ; then
-			CPPFLAGS="$CPPFLAGS -DHAVE_PANGO=1 `pkg-config pango cairo freetype2 --cflags`"
-			LDLIBS="$LDLIBS `pkg-config pangocairo pangoft2 freetype2 --libs`"
-		else
-			echo "pangocairo not found - no pango support"
-		fi
-	else
-		echo "freetype2 not found - no pango support"
-	fi
+if ! $PKG_CONFIG --exists freetype2 ; then
+	echo "pkg-config/freetype2 not found - no pango support"
+elif ! $PKG_CONFIG --exists pangocairo ; then
+	echo "pangocairo not found - no pango support"
 else
-	echo "pkg-config not found - no pango support"
+	CPPFLAGS="$CPPFLAGS -DHAVE_PANGO=1 `$PKG_CONFIG pango cairo freetype2 --cflags`"
+	LDLIBS="`$PKG_CONFIG pangocairo pangoft2 freetype2 --libs` $LDLIBS"
 fi
 
 CPPFLAGS="$CPPFLAGS -I."

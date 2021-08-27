@@ -3,7 +3,7 @@
  *
  * This file is part of abcm2ps.
  *
- * Copyright (C) 1998-2019 Jean-François Moine (http://moinejf.free.fr)
+ * Copyright (C) 1998-2021 Jean-François Moine (http://moinejf.free.fr)
  * Adapted from abc2ps, Copyright (C) 1996-1998 Michael Methfessel
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -462,11 +462,14 @@ again:
 		for (m = nhd; m > 0; m--) {
 			if (s->u.note.notes[m].pit == s->u.note.notes[m - 1].pit
 			 && s->u.note.notes[m].acc == s->u.note.notes[m - 1].acc) {
-				memmove(&s->u.note.notes[m - 1],
-					&s->u.note.notes[m],
-					sizeof s->u.note.notes[0]);
-				memmove(&s->pits[m - 1], &s->pits[m],
-					sizeof s->pits[0]);
+				i = nhd - m;
+				if (i > 0) {
+					memmove(&s->u.note.notes[m],
+						&s->u.note.notes[m + 1],
+						sizeof s->u.note.notes[0] * i);
+					memmove(&s->pits[m], &s->pits[m + 1],
+						sizeof s->pits[0] * i);
+				}
 				s->nhd = --nhd;
 			}
 		}
@@ -1141,8 +1144,8 @@ static void set_width(struct SYMBOL *s)
 		s->wl = xx;
 		break;
 	case BAR:
-		if (s->sflags & S_NOREPBRA)
-			break;
+//		if (s->sflags & S_NOREPBRA)
+//			break;
 		if (!(s->flags & ABC_F_INVIS)) {
 			int bar_type;
 
@@ -1972,7 +1975,7 @@ normal:
 				break;
 			goto cut_here;
 		}
-		if (s->extra) {
+		if (s->extra && s->type != GRACE) {
 			if (!extra)
 				extra = s;
 			else
@@ -2629,8 +2632,10 @@ static void set_clefs(void)
 				 && new_line == staff_clef[staff].clef->u.clef.line)
 					continue;
 				g = s;
-				while (g->voice != voice)
+				while (g && g->voice != voice)
 					g = g->ts_next;
+				if (!g)
+					continue;
 				if (g->type != CLEF) {
 					g = insert_clef(g, new_type, new_line);
 					if (s2->sflags & S_CLEF_AUTO)
@@ -2912,7 +2917,8 @@ if (staff > nst) {
 			if (u->ymn < stb[staff].st[i].ymn)
 				stb[staff].st[i].ymn = u->ymn;
 			if (u->sflags & S_XSTEM) {
-				if (u->ts_prev->staff != staff - 1
+				if (!u->ts_prev
+				 || u->ts_prev->staff != staff - 1
 				 || u->ts_prev->abc_type != ABC_T_NOTE) {
 					error(1, s, "Bad !xstem!");
 					u->sflags &= ~S_XSTEM;
@@ -3164,7 +3170,8 @@ static struct SYMBOL *sym_new(int type,
 
 	s->ts_next = last_s;
 	s->ts_prev = last_s->ts_prev;
-	s->ts_prev->ts_next = s;
+	if (s->ts_prev)
+		s->ts_prev->ts_next = s;
 	if (!s->ts_prev || s->ts_prev->type != type)
 		s->sflags |= S_SEQST;
 	last_s->ts_prev = s;
@@ -3324,6 +3331,9 @@ static void init_music_line(void)
 
 		// if bar already, keep it in sequence
 		voice = p_voice - voice_tb;
+		bar_start = p_voice->bar_start;
+		p_voice->bar_start = 0;
+
 		if (last_s
 		 && last_s->voice == voice && last_s->type == BAR) {
 			p_voice->last_sym = last_s;
@@ -3331,10 +3341,8 @@ static void init_music_line(void)
 			continue;
 		}
 
-		bar_start = p_voice->bar_start;
 		if (!bar_start)
 			continue;
-		p_voice->bar_start = 0;
 
 		if (cursys->voice[voice].range < 0
 		 || cursys->voice[voice].second

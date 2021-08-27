@@ -3,7 +3,7 @@
  *
  * This file is part of abcm2ps.
  *
- * Copyright (C) 1998-2019 Jean-François Moine (http://moinejf.free.fr)
+ * Copyright (C) 1998-2021 Jean-François Moine (http://moinejf.free.fr)
  * Adapted from abc2ps, Copyright (C) 1996-1998 Michael Methfessel
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -1585,13 +1585,17 @@ char *parse_acc_pit(char *p,
 		if (microscale == 0) {
 			d--;
 			d += (n - 1) << 8;	/* short [ (n-1) | (d-1) ] */
-			for (n = 1; n < MAXMICRO; n++) {
+			if (d == 0) {
+				n = MAXMICRO - 1;
+			} else {
+			    for (n = 1; n < MAXMICRO; n++) {
 				if (parse.micro_tb[n] == d)
 					break;
 				if (parse.micro_tb[n] == 0) {
 					parse.micro_tb[n] = d;
 					break;
 				}
+			    }
 			}
 			if (n == MAXMICRO) {
 				syntax("Too many microtone accidentals", p);
@@ -1794,34 +1798,41 @@ static char *parse_len(char *p,
 			int *p_len)
 {
 	int len, fac;
+	int err = 0;
 	char *q;
 
 	len = dur_u;
 	if (isdigit((unsigned char) *p)) {
 		len *= strtol(p, &q, 10);
-		if (len <= 0) {
+		if (len <= 0 || len > 10000) {
 			syntax("Bad length", p);
-			len = BASE_LEN;
+			len = dur_u;
 		}
 		p = q;
 	}
-	fac = 1;
-	while (*p == '/') {
-		p++;
-		if (isdigit((unsigned char) *p)) {
-			fac *= strtol(p, &q, 10);
-			if (fac == 0) {
-				syntax("Bad length divisor", p - 1);
-				fac = 1;
-			}
-			p = q;
-		} else {
-			fac *= 2;
+	if (*p != '/') {
+		*p_len = len;
+		return p;
+	}
+	if (isdigit((unsigned char) p[1])) {
+		fac = strtol(p + 1, &q, 10);
+		p = q;
+		if (fac == 0 || (fac & (fac - 1)))
+			err = 1;
+		else
+			len /= fac;
+	} else {
+		while (*p == '/') {
+			if (len & 1)
+				err = 1;
+			len /= 2;
+			p++;
 		}
 	}
-	if (len % fac)
+	if (err || !len) {
 		syntax("Bad length divisor", p - 1);
-	len /= fac;
+		len = dur_u;
+	}
 	*p_len = len;
 	return p;
 }
@@ -2029,13 +2040,15 @@ static int parse_line(char *p)
 		case CHAR_NOTE:
 			p = parse_note(p - 1, flags);
 			flags &= ABC_F_GRACE;
-			parse.last_sym->u.note.slur_st = slur;
-			slur = 0;
-			if (parse.last_sym->u.note.notes[0].len > 0) /* if not space */
-				curvoice->last_note = parse.last_sym;
+			if (slur && parse.last_sym->u.note.notes[0].len) {
+				parse.last_sym->u.note.slur_st = slur;
+				slur = 0;
+			}
 			break;
 		case CHAR_SLASH:		/* '/' */
 			if (flags & ABC_F_GRACE)
+				goto bad_char;
+			if (char_tb[(unsigned char) p[-1]] != CHAR_BAR)
 				goto bad_char;
 			q = p;
 			while (*q == '/')
@@ -2065,9 +2078,10 @@ static int parse_line(char *p)
 			if (p[1] != ':') {
 				p = parse_note(p - 1, flags); /* chord */
 				flags &= ABC_F_GRACE;
-				parse.last_sym->u.note.slur_st = slur;
-				slur = 0;
-				curvoice->last_note = parse.last_sym;
+				if (slur && parse.last_sym->u.note.notes[0].len) {
+					parse.last_sym->u.note.slur_st = slur;
+					slur = 0;
+				}
 				break;
 			}
 
@@ -2258,7 +2272,6 @@ static int parse_line(char *p)
 			}
 			if (p[-1] == '<')
 				i = -i;
-			broken_rhythm(curvoice->last_note, i);
 			curvoice->last_note->u.note.brhythm = i;
 			break;
 		case CHAR_IGN:			/* '*' & '`' */
@@ -2332,7 +2345,7 @@ static char *parse_note(char *p,
 		len = 1;
 		if (isdigit((unsigned char) *p)) {
 			len = strtol(p, &q, 10);
-			if (len == 0 && len > 100) {
+			if (len == 0 || len > 100) {
 				syntax("Bad number of measures", p);
 				len = 1;
 			}
@@ -2483,8 +2496,11 @@ static char *parse_note(char *p,
 
 do_brhythm:
 	if (curvoice->last_note
-	 && curvoice->last_note->u.note.brhythm != 0)
+	 && curvoice->last_note->u.note.brhythm != 0) {
+		broken_rhythm(curvoice->last_note,
+				curvoice->last_note->u.note.brhythm);
 		broken_rhythm(s, -curvoice->last_note->u.note.brhythm);
+	}
 add_deco:
 	if (dc.n > 0) {
 		memcpy(s->abc_type != ABC_T_MREST ? &s->u.note.dc
@@ -2498,6 +2514,8 @@ add_deco:
 		syntax("Not a note in grace note sequence", p);
 		goto err;
 	}
+	if (s->u.note.notes[0].len > 0) /* if not space */
+		curvoice->last_note = s;
 	return p;
 
 err:

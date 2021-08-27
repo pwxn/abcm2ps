@@ -524,7 +524,7 @@ struct FORMAT { 		/* struct for page layout */
 	float topspace, wordsspace, titlespace, subtitlespace, partsspace;
 	float composerspace, musicspace, vocalspace, textspace;
 	float breaklimit, maxshrink, lineskipfac, parskipfac, stemheight;
-	float gutter, indent, infospace, slurheight, notespacingfactor, scale;
+	float gutter, indent, infospace, slurheight, tieheight, notespacingfactor, scale;
 	float staffsep, sysstaffsep, maxstaffsep, maxsysstaffsep, stretchlast;
 	int abc2pscompat, alignbars, aligncomposer, autoclef;
 	int barsperstaff, breakoneoln, bstemdown, cancelkey, capo;
@@ -532,8 +532,8 @@ struct FORMAT { 		/* struct for page layout */
 	int dblrepbar, decoerr, dynalign, flatbeams, flatbeamgracing, infoline;
 	int gchordbox, graceslurs, graceword,gracespace, hyphencont;
 	int keywarn, landscape, linewarn;
-	int measurebox, measurefirst, measurenb, micronewps;
-	int oneperpage;
+	int measurebox, measurefirst, measurenb;
+	int nedo, oneperpage;
 	int nowrap;
 #ifdef HAVE_PANGO
 	int pango;

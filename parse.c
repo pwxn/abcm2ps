@@ -3,7 +3,7 @@
  *
  * This file is part of abcm2ps.
  *
- * Copyright (C) 1998-2019 Jean-François Moine (http://moinejf.free.fr)
+ * Copyright (C) 1998-2021 Jean-François Moine (http://moinejf.free.fr)
  * Adapted from abc2ps, Copyright (C) 1996-1998 Michael Methfessel
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -214,7 +214,7 @@ static void sort_all(void)
 	struct SYMBOL *s, *prev, *s2;
 	struct VOICE_S *p_voice;
 	int fl, voice, time, w, wmin, multi, mrest_time;
-	int nb, r, set_sy, new_sy;	// nv
+	int nb, r, r2, v2, set_sy, new_sy;	// nv
 	struct SYMBOL *vtb[MAXVOICE];
 	signed char vn[MAXVOICE];	/* voice indexed by range */
 
@@ -353,7 +353,6 @@ static void sort_all(void)
 			 || w_tb[s->type] != wmin)
 				continue;
 			if (s->type == STAVES) {	// change STAVES to a flag
-				sy = sy->next;
 				set_sy = new_sy = 1;
 				if (s->prev)
 					s->prev->next = s->next;
@@ -361,6 +360,20 @@ static void sort_all(void)
 					voice_tb[voice].sym = s->next;
 				if (s->next)
 					s->next->prev = s->prev;
+
+				// set all voices of previous and next staff systems
+				// as reachable
+				for (r2 = 0; r2 < MAXVOICE; r2++) {
+					if (vn[r2] < 0)
+						break;
+				}
+				for (v2 = 0; v2 < MAXVOICE; v2++) {
+					if (sy->next->voice[v2].range < 0
+					 || sy->voice[v2].range >= 0)
+						continue;
+					vn[r2++] = v2;
+				}
+				sy = sy->next;		// new staff system
 			} else {
 				if (fl) {
 					fl = 0;
@@ -467,25 +480,6 @@ static void voice_compress(void)
 				}
 				break;
 #endif
-			case FMTCHG:
-				s2 = s->extra;
-				if (s2) {	/* dummy format */
-					if (!ns)
-						ns = s2;
-					if (s->prev) {
-						s->prev->next = s2;
-						s2->prev = s->prev;
-					}
-					if (!s->next) {
-						ns = NULL;
-						break;
-					}
-					while (s2->next)
-						s2 = s2->next;
-					s->next->prev = s2;
-					s2->next = s->next;
-				}
-				/* fall thru */
 			case TEMPO:
 			case PART:
 			case TUPLET:
@@ -553,8 +547,11 @@ static void voice_compress(void)
 			}
 			if (!ns)
 				continue;
+			s2 = s->extra;			// old compression
 			s->extra = ns;
-			s->prev->next = NULL;
+			s->prev->next = s2;
+			if (s2)
+				s2->prev = s->prev;
 			s->prev = ns->prev;
 			if (s->prev)
 				s->prev->next = s;
@@ -716,6 +713,8 @@ static struct SYMBOL *go_global_time(struct SYMBOL *s,
 			 && s2->time != 0)
 				break;
 		}
+		if (!s2)
+			return s2;
 		if (s2->time < voice_tb[cursys->top_voice].meter.wmeasure)
 			s = s2;
 		goto chk_time;
@@ -912,6 +911,8 @@ static void set_bar_num(void)
 				break;
 
 			/* move the clef */
+			if (!s->next)
+				break;
 			s->next->prev = s->prev;
 			s->prev->next = s->next;
 			s->ts_next->ts_prev = s->ts_prev;
@@ -2010,9 +2011,12 @@ static char txt_no_note[] = "No note in voice overlay";
 			error(1, s, "Erroneous end of voice overlap");
 			return;
 		}
-		if (p_voice->time != over_mxtime)
-			error(1, s, tx_wrong_dur);
 		curvoice = &voice_tb[over_voice];
+		if (p_voice->time != over_mxtime) {
+			error(1, s, tx_wrong_dur);
+			if (p_voice->time > over_mxtime)
+				curvoice->time = p_voice->time;
+		}
 		over_mxtime = 0;
 		over_voice = -1;
 		over_time = -1;
@@ -2114,8 +2118,12 @@ static char txt_no_note[] = "No note in voice overlay";
 	} else {
 		if (over_mxtime == 0)
 			over_mxtime = p_voice->time;
-		else if (p_voice->time != over_mxtime)
+		else if (p_voice->time != over_mxtime) {
 			error(1, s, tx_wrong_dur);
+			if (p_voice->time > over_mxtime)
+				voice_tb[over_voice].time =
+					over_mxtime = p_voice->time;
+		}
 	}
 	p_voice2->time = over_time;
 	curvoice = p_voice2;
@@ -2315,10 +2323,15 @@ static void parse_staves(struct SYMBOL *s,
 /* -- get staves definition (%%staves / %%score) -- */
 static void get_staves(struct SYMBOL *s)
 {
-	struct SYMBOL *s2;
+//	struct SYMBOL *s2;
 	struct VOICE_S *p_voice, *p_voice2;
 	struct staff_s *p_staff, staves[MAXVOICE];
 	int i, flags, voice, staff, range, dup_voice, maxtime;
+
+	memset(staves, 0, sizeof staves);
+	parse_staves(s, staves);
+	if (staves[0].voice < 0)			// if error
+		return;
 
 	voice_compress();
 	voice_dup();
@@ -2333,8 +2346,7 @@ static void get_staves(struct SYMBOL *s)
 		if (p_voice->sym)
 			flags = 1;
 	}
-	if (flags == 0			/* if first %%staves */
-	 || (maxtime == 0 && staves_found < 0)) {
+	if (flags == 0) {			/* if first %%staves */
 		for (voice = 0; voice < MAXVOICE; voice++)
 			parsys->voice[voice].range = -1;
 	} else {
@@ -2357,26 +2369,23 @@ static void get_staves(struct SYMBOL *s)
 		curvoice->time = maxtime;
 
 		// put the staves before a measure bar (see draw_bar())
-		s2 = curvoice->last_sym;
-		if (s2 && s2->type == BAR && s2->time == maxtime) {
-			curvoice->last_sym = s2->prev;
-			if (!curvoice->last_sym)
-				curvoice->sym = NULL;
-			sym_link(s, STAVES);
-			s->next = s2;
-			s2->prev = s;
-			curvoice->last_sym = s2;
-		} else {
+//		s2 = curvoice->last_sym;
+//		if (s2 && s2->type == BAR && s2->time == maxtime) {
+//			curvoice->last_sym = s2->prev;
+//			if (!curvoice->last_sym)
+//				curvoice->sym = NULL;
+//			sym_link(s, STAVES);
+//			s->next = s2;
+//			s2->prev = s;
+//			curvoice->last_sym = s2;
+//		} else {
 			sym_link(s, STAVES); // link the staves in the current voice
-		}
+//		}
 		s->state = ABC_S_HEAD; /* (output PS sequences immediately) */
 		parsys->nstaff = nstaff;
 		system_new();
 	}
 	staves_found = maxtime;
-
-	memset(staves, 0, sizeof staves);
-	parse_staves(s, staves);
 
 	/* initialize the voices */
 	for (voice = 0, p_voice = voice_tb;
@@ -3058,7 +3067,8 @@ static struct SYMBOL *get_info(struct SYMBOL *s)
 		s = get_global_def(s);
 		break;
 	case 'U':
-		deco[s->u.user.symbol] = parse.deco_tb[s->u.user.value - 128];
+		if (s->u.user.value)	// if no error
+			deco[s->u.user.symbol] = parse.deco_tb[s->u.user.value - 128];
 		break;
 	case 'u':
 		break;
@@ -3620,6 +3630,8 @@ void do_tune(void)
 			continue;
 		case ABC_T_TUPLET:
 			set_tuplet(s);
+			if (!s->type && (s->flags & ABC_F_GR_END))
+				curvoice->last_sym->flags |= ABC_F_GR_END;
 			break;
 		default:
 			continue;
@@ -4611,6 +4623,7 @@ rmax=buf + i;
 	for (;;) {
 		if (*p == '\0' || *p == '"')
 			break;
+		i = 0;
 		switch (*p++) {
 		default:
 			if ((isdigit((unsigned char) p[-1]))
@@ -4653,7 +4666,8 @@ rmax=buf + i;
 			*r++ = ' ';
 			*r++ = '0';
 			op = "RL";
-			npar = 1;
+			i = 1;
+			npar = 2;
 			break;
 		case 'z':
 			op = "closepath";
@@ -4697,7 +4711,7 @@ rmax=buf + i;
 			break;
 		}
 		*r++ = ' ';
-		for (i = 0; i < npar; i++) {
+		for ( ; i < npar; i++) {
 			while (isspace((unsigned char) *p))
 				p++;
 			if (i & 1) {		// y is inverted
@@ -5429,6 +5443,26 @@ static struct SYMBOL *process_pscomment(struct SYMBOL *s)
 			return s;
 		}
 		break;
+	case 'M':
+		if (strcmp(w, "MIDI") == 0
+		 && strncmp(p, "temperamentequal", 16) == 0) {
+			int n;
+
+			if (cfmt.nedo) {
+				error(1, s, "%%%%MIDI temperamentequal redefined");
+				return s;
+			}
+			p += 16;
+			while (isspace((unsigned char) *p))
+				p++;
+			n = atoi(p);
+			if (n < 7 || n > 53) {
+				error(1, s, "Bad value in %%%%MIDI temperamentequal");
+				return s;
+			}
+			cfmt.nedo = n;
+		}
+		break;
 	case 'n':
 		if (strcmp(w, "newpage") == 0) {
 			if (epsf || !in_fname)
@@ -6131,6 +6165,13 @@ static void set_tuplet(struct SYMBOL *t)
 
 	r = t->u.tuplet.r_plet;
 	grace = t->flags & ABC_F_GRACE;
+	if (t->flags & ABC_F_GR_END) {
+		if (r != 1) {
+			error(1, t, "Empty tuplet");
+			return;
+		}
+		grace = 0;
+	}
 
 	l = 0;
 	for (s = t->abc_next; s; s = s->abc_next) {
@@ -6192,12 +6233,21 @@ static void set_tuplet(struct SYMBOL *t)
 		}
 		if (s->u.note.notes[0].len == 0)	/* space ('y') */
 			continue;
-		if (grace ^ (s->flags & ABC_F_GRACE))
-			continue;
+		if (grace) {
+			if (!(s->flags & ABC_F_GRACE)) {
+				error(1, t, "End of tuplet before end of grace sequence");
+				return;
+			}
+		} else if (s->flags & ABC_F_GRACE)
+			continue;		// skip the grace note
 		s1 = s;
 		l += s->dur;
 		if (--r <= 0)
 			break;
+	}
+	if (!l) {
+		error(1, t, "No note in the tuplet");
+		return;
 	}
 	if (!s) {
 		error(1, t, "End of tune found inside a tuplet");

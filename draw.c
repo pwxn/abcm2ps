@@ -3,7 +3,7 @@
  *
  * This file is part of abcm2ps.
  *
- * Copyright (C) 1998-2019 Jean-François Moine (http://moinejf.free.fr)
+ * Copyright (C) 1998-2020 Jean-François Moine (http://moinejf.free.fr)
  * Adapted from abc2ps, Copyright (C) 1996-1998 Michael Methfessel
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -983,6 +983,9 @@ static void draw_acc(int acc, int microscale)
 		}
 		a2b("%d %s%d ", n, acc_tb[acc & 0x07], d);
 	} else {
+		if (acc >> 3 != 0
+		 && cfmt.nedo)		// %%MIDI temperamentequal <nedo>
+			n = ((((n >> 8) + 1) * 12) - 1) * 256 + cfmt.nedo - 1;
 		a2b("%s%d ", acc_tb[acc & 0x07], n);
 	}
 }
@@ -2873,10 +2876,16 @@ static struct SYMBOL *draw_tuplet(struct SYMBOL *t,	/* tuplet in extra */
 	x1 = s1->x - 7;
 
 	if (s2->dur > s2->prev->dur) {
-		if (s2->next)
-			x2 = s2->next->x - s2->next->wl - 8;
-		else
-			x2 = realwidth - 6;
+		sy = s2->next;
+		if (!sy			// maybe a note in an overlay voice
+		 || sy->time != s2->time + s2->dur) {
+			for (sy = s2->ts_next; sy; sy = sy->ts_next) {
+				if ((sy->sflags & S_SEQST)
+				 && sy->time >= s2->time + s2->dur)
+					break;
+			}
+		}
+		x2 = sy ? sy->x - sy->wl - 5 : realwidth - 6;
 	} else {
 		x2 = s2->x + 2;
 		if (s2->u.note.notes[s2->nhd].shhd > 0)
@@ -3086,6 +3095,11 @@ static void draw_note_ties(struct SYMBOL *k1,
 			x2 -= 1.5;
 		}
 
+		if (k1->dots && !(p1 & 1)
+		 && ((s > 0 && k1->doty >= 0)
+		  || (s < 0 && k1->doty < 0)))
+			x1 += 6;		// avoid clash with dots
+
 		y = 3 * (p - 18);
 //fixme: clash when 2 ties on second interval chord
 //		if (p & 1)
@@ -3109,6 +3123,7 @@ static void draw_note_ties(struct SYMBOL *k1,
 #endif
 
 		h = (.04 * (x2 - x1) + 10) * s;
+		h *= cfmt.tieheight;
 		slur_out(x1, staff_tb[staff].y + y,
 			 x2, staff_tb[staff].y + y,
 			 s, h, k1->u.note.notes[m1].ti1 & SL_DOTTED, -1);
@@ -4174,7 +4189,7 @@ void draw_sym_near(void)
 	if (cfmt.measurenb >= 0)
 		draw_measnb();
 
-//	draw_deco_note();
+	draw_deco_note();
 
 	for (p_voice = first_voice; p_voice; p_voice = p_voice->next) {
 		s = p_voice->sym;
@@ -4226,7 +4241,7 @@ void draw_sym_near(void)
 		}
 	}
 	set_color(0);
-	draw_deco_note();
+//	draw_deco_note();
 	draw_deco_staff();
 	set_sscale(-1);		/* restore the scale parameters */
 	draw_all_lyrics();
@@ -4374,7 +4389,8 @@ static float set_staff(void)
 	y = 0;
 	if (staff > nstaff) {
 		staff--;			/* one staff, empty */
-	} else {
+//	} else {
+	} {
 		for (i = 0; i < YSTEP; i++) {
 			v = staff_tb[staff].top[i];
 			if (y < v)
@@ -4384,9 +4400,6 @@ static float set_staff(void)
 
 	/* draw the parts and tempo indications if any */
 	y += draw_partempo(staff, y);
-
-	if (empty[staff])
-		return y;
 
 	y *= staff_tb[staff].staffscale;
 	staffsep = cfmt.staffsep * 0.5 +
@@ -4611,17 +4624,18 @@ float draw_systems(float indent)
 			s2 = s->prev;
 			if (!s2)
 				break;
-			x2 = s2->x;
-			if (s2->type != BAR)
-				x2 += s2->wr;
+			if (s2->type == BAR)
+				x2 = s2->x;
+			else
+				x2 = s->x - s->xmx;
 			staff = s->staff;
 			x = xstaff[staff];
 			if (x >= 0) {
 				if (x >= x2)
 					continue;
 				draw_staff(staff, x, x2);
+				xstaff[staff] = s->x;
 			}
-			xstaff[staff] = s->x;
 			break;
 		default:
 //fixme:does not work for "%%staves K: M: $" */

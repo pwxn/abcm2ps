@@ -95,7 +95,6 @@ static struct format {
 	{"measurefirst", &cfmt.measurefirst, FORMAT_I, 0},
 	{"measurefont", &cfmt.font_tb[MEASUREFONT], FORMAT_F, 2},
 	{"measurenb", &cfmt.measurenb, FORMAT_I, 0},
-	{"micronewps", &cfmt.micronewps, FORMAT_B, 0},
 	{"musicfont", &cfmt.musicfont, FORMAT_S, 1},
 	{"musicspace", &cfmt.musicspace, FORMAT_U, 0},
 	{"notespacingfactor", &cfmt.notespacingfactor, FORMAT_R, 1},
@@ -138,6 +137,7 @@ static struct format {
 	{"textfont", &cfmt.font_tb[TEXTFONT], FORMAT_F, 0},
 	{"textoption", &cfmt.textoption, FORMAT_I, 4},
 	{"textspace", &cfmt.textspace, FORMAT_U, 0},
+	{"tieheight", &cfmt.tieheight, FORMAT_R, 0},
 	{"titlecaps", &cfmt.titlecaps, FORMAT_B, 0},
 	{"titlefont", &cfmt.font_tb[TITLEFONT], FORMAT_F, 0},
 	{"titleformat", &cfmt.titleformat, FORMAT_S, 0},
@@ -380,6 +380,7 @@ void set_format(void)
 	f->textspace = 14 PT;
 	f->scale = 1.0;
 	f->slurheight = 1.0;
+	f->tieheight = 1.0;
 	f->maxshrink = 0.65;
 	f->breaklimit = 0.7;
 	f->stretchlast = 0.25;
@@ -1140,6 +1141,8 @@ void interpret_fmt_line(char *w,		/* keyword */
 			f = strtod(p, &q);
 			if (*q != '\0' && *q != ' ')
 				goto bad;
+			if (f < .1 || f > 10.)
+				goto bad;
 			cfmt.scale = f / 0.75;		// old -> new scale
 			return;
 		}
@@ -1344,7 +1347,29 @@ void interpret_fmt_line(char *w,		/* keyword */
 	case FORMAT_U:
 		*((float *) fd->v) = scan_u(p, fd->subtype);
 		switch (fd->subtype) {
+		case 1:
+			if (strcmp(fd->name, "rightmargin") != 0
+			 && strcmp(fd->name, "leftmargin") != 0)
+				break;
+			staffwidth = cfmt.pagewidth -
+						cfmt.leftmargin -
+						cfmt.rightmargin;
+			if (staffwidth > 100)
+				break;
+			error(1, NULL, "'staffwidth' too small\n");
+			staffwidth = 100;
+			if (fd->name[0] == 'r')
+				cfmt.rightmargin = cfmt.pagewidth -
+						cfmt.leftmargin - staffwidth;
+			else
+				cfmt.leftmargin = cfmt.pagewidth -
+						cfmt.rightmargin - staffwidth;
+			break;
 		case 2:					/* staffwidth */
+			if (staffwidth < 100) {
+				error(1, NULL, "'staffwidth' too small\n");
+				break;
+			}
 			f = (cfmt.landscape ? cfmt.pageheight : cfmt.pagewidth)
 					- staffwidth - cfmt.leftmargin;
 			if (f < 0)

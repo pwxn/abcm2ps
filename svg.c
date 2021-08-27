@@ -1148,7 +1148,7 @@ static void define_head(float w, float h)
 		"<style type=\"text/css\">\n"
 		".fill {fill: currentColor}\n"
 		".stroke {stroke: currentColor; fill: none}\n"
-		"text{white-space: pre}\n";
+		"text{white-space:pre; fill:currentColor}\n";
 	static const char svg_font_style[] =
 		".music {font:24px %s;\n"
 		"	fill: currentColor}\n";
@@ -1203,7 +1203,6 @@ void define_svg_symbols(char *title, int num, float w, float h)
 			fprintf(fout,
 				"}\n"
 				"\t@page {margin: 0}\n"
-				"\ttext {white-space: pre; fill:currentColor}\n"
 				"\tsvg {display: block}\n"
 				"</style>\n"
 				"<title>%s</title>\n"
@@ -2342,6 +2341,21 @@ curveto:
 				"	x=\"%.2f\" y=\"%.2f\" text-anchor=\"middle\">%s</text>\n",
 				x, y, s + 1);
 			free(s);
+			return;
+		}
+		if (strcmp(op, "dacoda") == 0) {
+			setg(1);
+			e = elt_dup(stack);
+			y = gcur.yoffs - pop_free_val() - 7;
+			e2 = elt_dup(stack);
+			e2->u.v += 10;
+			x = gcur.xoffs + pop_free_val() - 10;
+			fprintf(fout, "<text style=\"font:16px serif\"\n"
+				"	x=\"%.2f\" y=\"%.2f\" text-anchor=\"middle\">Da</text>\n",
+				x, y);
+			push(e2);
+			push(e);
+			xysym("coda", D_coda);
 			return;
 		}
 		if (strcmp(op, "def") == 0) {
